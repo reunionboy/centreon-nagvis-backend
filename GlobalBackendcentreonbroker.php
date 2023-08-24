@@ -81,7 +81,11 @@ class GlobalBackendcentreonbroker implements GlobalBackendInterface {
             'match' => MATCH_STRING_NO_SPACE
         )
     );
-
+    
+    public function getProgramStart() {
+	    return -1;
+	}
+    
     /**
      * Constructor
      *
@@ -270,7 +274,7 @@ class GlobalBackendcentreonbroker implements GlobalBackendInterface {
                 }
             }
             /* Unchecked state */
-            if ($row['has_been_checked'] == '0' || $row['current_state'] == '') {
+            if (isset($e) && $row['has_been_checked'] == '0' || $row['current_state'] == '') {
                 $arrReturn[$e[18]] = Array(
                     UNCHECKED,
                     l('hostIsPending', Array('HOST' => $row['name'])),
@@ -412,7 +416,7 @@ class GlobalBackendcentreonbroker implements GlobalBackendInterface {
             unset($row['host_id']);
 
             /* Unchecked state */
-            if ($row['has_been_checked'] == '0' || $row['current_state'] == '') {
+            if (isset($e) && $row['has_been_checked'] == '0' || $row['current_state'] == '') {
                 $svc = array_fill(0, EXT_STATE_SIZE, null);
                 $svc[DESCRIPTION]  = $e[0];
                 $svc[DISPLAY_NAME] = $e[1];
@@ -739,7 +743,7 @@ class GlobalBackendcentreonbroker implements GlobalBackendInterface {
     public function getHostNamesWithNoParent() {
         $queryNoParents = 'SELECT name
             FROM hosts
-            WHERE enabled = 1 AND host_id NOT IN (SELECT host_id
+            WHERE enabled = 1 AND host_id NOT IN (SELECT child_id
                     FROM hosts_hosts_parents)';
         if ($this->_instanceId != 0) {
             $queryNoParents .= ' AND instance_id = ' . $this->_instanceId;
@@ -784,6 +788,9 @@ class GlobalBackendcentreonbroker implements GlobalBackendInterface {
         return $childs;
     }
 
+    public function getDirectChildDependenciesNamesByHostName($hostName, $min_business_impact=false){ 
+	    return $this->getDirectChildNamesByHostName($hostName);
+    }   
     public function getDirectParentNamesByHostName($hostname) {
         $queryGetParents = 'SELECT h.name
             FROM hosts h, hosts_hosts_parents hp
@@ -810,6 +817,10 @@ class GlobalBackendcentreonbroker implements GlobalBackendInterface {
         return $parents;
     }
 
+    public function getDirectParentDependenciesNamesByHostName($hostName, $min_business_impact=false) { 
+	    return $this->getDirectParentNamesByHostName($hostName);
+    }
+    
     private function getHostAckByHost($hostId) {
         if (isset($this->_cacheHostAck[$hostId])) {
             return $this->_cacheHostAck[$hostId];
@@ -836,6 +847,33 @@ class GlobalBackendcentreonbroker implements GlobalBackendInterface {
         $this->_cacheHostAck[$hostId] = $return;
         return $this->_cacheHostAck[$hostId];
     }
+    
+    public function getHostNamesInHostgroup($hostgroupName) {
+		
+	$queryHostNameInHostgroup = 'SELECT h.name 
+	FROM hosts h, hosts_hostgroups hg 
+	WHERE h.host_id = hg.host_id 
+		AND hg.hostgroup_id IN (SELECT hostgroup_id 
+		FROM hostgroups 
+		WHERE name = "%s")';
+			
+		if ($this->_instanceId != 0) {
+		$queryHostNameInHostgroup .= ' AND h.instance_id = ' . $this->_instanceId;
+		}
+		$queryHostNameInHostgroup = sprintf($queryHostNameInHostgroup, $this->_dbh->quote($hostgroupName));
+
+		try {
+			$stmt = $this->_dbh->query($queryHostNameInHostgroup);
+		} catch (PDOException $e) {
+			throw new BackendException(l('errorGettingHostNamesInHostgroup', array('BACKENDID' => $this->_backendId, 'ERROR' => $e->getMessage())));
+		}
+
+		$hostname = array();
+		while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+		$hostname[] = $row['name'];
+	}
+	return $hostname;
+    }		
 
     private function parseFilter($objects, $filters, $tableAlias = 'h') {
         $listKeys = array(
@@ -884,7 +922,7 @@ class GlobalBackendcentreonbroker implements GlobalBackendInterface {
      * @throws BackendConnectionProblem
      */
     private function connectToDb() {
-        if (false === extension_loaded('mysql')) {
+        if (false === extension_loaded('mysqli')) {
             throw new BackendConnectionProblem(l('mysqlNotSupported', array('BACKENDID', $this->_backendId)));
         }
         $fullhost = 'host=' . $this->_dbhost;
